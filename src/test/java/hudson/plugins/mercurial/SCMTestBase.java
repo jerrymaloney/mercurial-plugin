@@ -12,12 +12,14 @@ import hudson.model.ParametersDefinitionProperty;
 import hudson.model.Result;
 import hudson.model.StringParameterDefinition;
 import hudson.model.StringParameterValue;
+import hudson.model.User;
 import hudson.scm.ChangeLogSet;
 import hudson.scm.ChangeLogSet.Entry;
 import hudson.scm.PollingResult;
 import hudson.scm.SCM;
 
 import java.io.File;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -638,6 +640,35 @@ public abstract class SCMTestBase {
                 fail("There should not be any MercurialTagAction");
             }
         }
+    }
+    
+    /**
+     * The MercurialChangeLogParser.parser method is generating invalid email 
+     * addresses by converting User fullNames of the form 
+     * "joe.schmo <joe.schmo@example.com>" to 
+     * "joe.schmo _joe.schmo@example.com_".
+     */
+    @Bug(16332)
+    @Test public void parseAddressFromChangeLog() throws Exception {
+        File changeLogFile = writeChangeLogFile("<?xml version='1.0' encoding='UTF-8'?>" + 
+                                                "<changesets>" + 
+                                                "<changeset author='joe.schmo &lt;joe.schmo@example.com&gt;'/>" + 
+                                                "</changesets>");
+        FreeStyleProject p = j.createFreeStyleProject();
+        AbstractBuild<?, ?> b = p.scheduleBuild2(0).get();
+        MercurialSCM s = new MercurialSCM(hgInstallation(), repo.getPath(), "non-existing-branch", null, null, null, false);
+        MercurialChangeLogParser parser = (MercurialChangeLogParser)(s.createChangeLogParser());
+        MercurialChangeSetList changeSetList = parser.parse(b, changeLogFile);
+        User firstEntryAuthor = changeSetList.iterator().next().getAuthor();
+        assertEquals("joe.schmo <joe.schmo@example.com>", firstEntryAuthor.getId()); // alternatively, we could compare the string with firstEntryAuthor.getFullName() instead of firstEntryAuthor.getId() ... as far as I can tell they're always the same
+    }
+    
+    private File writeChangeLogFile(String content) throws IOException {
+        File f = File.createTempFile("changelog" ,".xml");
+        FileWriter w = new FileWriter(f);
+        w.write(content);
+        w.close();
+        return f;
     }
 
     private PretendSlave createNoopPretendSlave() throws Exception {
